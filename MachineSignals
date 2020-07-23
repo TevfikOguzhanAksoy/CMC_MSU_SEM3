@@ -1,0 +1,220 @@
+#include<stdio.h>
+#include<stdlib.h>
+#include<signal.h>
+#include<wait.h>
+#include<sys/types.h>
+#include<fcntl.h>
+#include<unistd.h>
+#include<string.h>
+
+#define MAX_SZ 1024
+
+int number,sig1count = 0,sig2count = 0;
+
+void signalHandler(int sig);
+
+int main(int argc,char* argv[])
+{
+	int fd[2];
+	int numProcess,i;
+	pid_t pid;
+	signal(SIGUSR1,signalHandler);
+	signal(SIGUSR2,signalHandler);
+	if(argv[1] != NULL)					//If everything's ok with the input.
+		if((numProcess = atoi(argv[1])) <= 0)
+		{
+			printf("ERROR: This is not a valid number. Shutting down the program!\n");
+			return -1;
+		}else;
+	else
+	{
+		printf("Amount of processes is not entered. Shutting down the program!\n");
+		return -1;
+	}
+	number = numProcess;
+	int* pids = (int*)malloc(numProcess*sizeof(int));
+	if(pids == NULL)
+	{
+		perror("ERROR: Memory couldn't be allocated for pids. Shutting down the program!");
+		return -1;
+	}
+	if(pipe(fd) < 0) 
+	{
+		perror("pipe");
+		return -1;
+	}
+	for(i = 0;i < numProcess;i++)
+	{
+		pid = fork();
+		pids[i] = pid;				
+		if(pid <=0)
+		{       
+			if(i+1==1)
+				printf("This is father ----- PID = %d\n",getpid());
+			else
+				printf("This is %d.Son ----- PID = %d\n",i, getpid());
+			break;
+		}
+	}
+	if(pid == -1)
+	{
+		perror("ERROR: Fork didn't work. Shutting down the program!");
+		return -1;
+	}
+	if(pid == 0)					//CHILD PROCESS
+	{
+		int n = i+1,to = 0,from;
+		char test[100];
+		sprintf(test,"config%d",n);			//config%d is now in the string test
+		char msgto[MAX_SZ] = "",msgfrom[MAX_SZ];
+		FILE* dosya = fopen(test,"r");			//config file is opened
+		sleep(n*0.5);					
+		if(dosya == NULL || fgetc(dosya) == EOF) 		//checking what's inside the config file.
+		{
+			if(n==1)
+				printf("Father has nothing to send.\n");
+			else
+				printf("%d.Son has nothing to send.\n",n-1);
+			kill(getppid(),SIGUSR1);		//sending signals to sigusr1
+		}
+		else
+		{
+			fseek(dosya,-1,SEEK_CUR);
+			if(n==1)
+				printf("Father has a message to send!\n");
+			else
+				printf("%d.Son has a message to send!\n",n-1);
+			int s;
+			char c;
+			char* str = (char*)malloc(255*sizeof(char)); //allocating memory for the message.
+			while((c = fgetc(dosya)) == '\n');
+			fseek(dosya,-1,SEEK_CUR);
+			do
+			{
+				s = 1;
+				fgets(str,254,dosya);		//str is now the message(or the receiver's number)
+				if(feof(dosya))			//if the receiver was not mentioned in the config file
+				{
+					if(n==1)
+						printf("There is no receiver of the father.\n");
+					else
+						printf("There is no receiver of the %d.Son.\n",n);
+					break;
+				}
+				for(int i = 0;i < strlen(str)-1;i++)
+				{
+					if((str[i] < '0') || (str[i] > '9'))
+					{
+						s = 0;
+						break;
+					}
+
+				}
+			}while(s == 0);		
+			to = atoi(str);			//to is now the receiver's number
+			free(str);
+			fread(msgto,MAX_SZ,1,dosya);	//msgto is read
+			kill(getppid(),SIGUSR2);	//sending signal to sigusr2
+		}
+		pause();
+		write(fd[1],&to,sizeof(int));		//message is written
+		write(fd[1],msgto,MAX_SZ);		//message is written to msgto
+		kill(getppid(),SIGUSR1);
+		while(1)
+		{
+			pause();			//waits until the handler function is executed or terminated
+			read(fd[0],&from,sizeof(int));
+			read(fd[0],msgfrom,MAX_SZ);		//receiving the messages
+			if((n==1) && (from==0))
+				printf("Father(PID %d) has received a message from himself: %s\n",getpid(), msgfrom);
+			else if ((n==1) && (from!=0))
+				printf("Father(PID %d) has received a message from %d.Son: %s\n",getpid(),from,msgfrom);
+			else if ((n!=1) && (from==0))
+				printf("%d.Son(PID %d) has received a message from father: %s\n",n-1, getpid(),msgfrom);
+			else
+				printf("%d.Son(PID %d) has received a message from %d.Son: %s\n",n-1, getpid(),from+1,msgfrom);
+			fclose(dosya);
+			kill(getppid(),SIGUSR1);
+		}
+	}
+	else				//PARENT PROCESS
+	{
+		while((sig1count + sig2count) != number);
+		if(sig1count == number)
+		{
+			for(i = 0;i < numProcess;i++)
+				kill(pids[i],SIGKILL);
+			return 0;
+		}
+		char** msg = (char**)malloc(numProcess*sizeof(char*));
+		if(msg == NULL)
+		{
+			perror("ERROR: Allocating memory for msg** failed. Shutting down the program!");
+			free(pids);
+			return -1;
+		}
+		int* to = (int*)malloc(numProcess*sizeof(int));
+		if(to == NULL)
+		{
+			perror("ERROR: Allocating memory for to* failed. Shutting down the program!");
+			free(msg);
+			return -1;
+		}
+		char str[MAX_SZ];
+		for(i = 0;i < numProcess;i++)
+		{
+			msg[i] = (char*)malloc(MAX_SZ*sizeof(char));
+			if(msg[i] == NULL)
+			{
+				int j;
+				perror("ERROR: Allocating memory for msg[] failed. Shutting down the program!");
+				for(j = 0; j < i; j++)
+					free(msg[j]);
+				free(msg);
+				free(to);
+				return -1;
+			}
+			kill(pids[i],SIGUSR2);
+			pause();			//waiting the signal to be executed or terminated.
+			read(fd[0],to+i,sizeof(int));	
+			read(fd[0],&str,MAX_SZ);	
+			strcpy(msg[i],str);		//Keeping the messages(str) in msg[]
+		}
+		printf("\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n");
+		for(i = 0;i < numProcess;i++)
+		{
+			if(to[i] <= 0 || to[i] > numProcess)
+				if(i!=0)
+					printf("There is no receiver of the %d.Son!\n\n",i);
+				else
+					printf("There is no receiver of the father.\n\n");
+			else
+			{
+				strcpy(str,msg[i]);
+				kill(pids[to[i]-1],SIGUSR2);
+				write(fd[1],&i,sizeof(int));
+				write(fd[1],&str,MAX_SZ);
+				pause();
+			}
+		}
+		for(i = 0;i < numProcess;i++)
+		{
+			kill(pids[i],SIGKILL);
+			free(msg[i]);
+		}
+		free(msg);
+		free(pids);
+		free(to);
+		return 0;
+	}	
+}
+
+void signalHandler(int sig)
+{
+	signal(SIGUSR1,signalHandler);
+	signal(SIGUSR2,signalHandler);
+	if(sig == SIGUSR1)
+		sig1count++;
+	if(sig == SIGUSR2)
+		sig2count++;
+}
