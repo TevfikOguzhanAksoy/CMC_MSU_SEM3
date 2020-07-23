@@ -1,0 +1,257 @@
+#include <stdio.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/wait.h>
+
+int createChild(FILE* file1, char* arg, int num);			// Creating sons
+int writeConfig(FILE* file, int num);					// Checking if the config file is written correct or not
+int readInf(FILE* file, char* replace, char* include); 			// Reading information from the config file
+int changeText(FILE* file, char replace, char include, int pid); 	// Working on the file
+int includeLetter(FILE* file, char replace, char include, int pid); 	// Changing the word
+int main(int argc, char** argv)
+{
+    int num;
+    char c;
+    FILE* file1;
+    if (argc != 3)                    					// Checking on the correctness of input
+    {
+        printf("ERROR: The needed amount of input is not reached! Shutting down!\n");
+        return -1;
+    }
+
+    file1 =fopen(argv[1], "r");
+
+    if (file1 == NULL)                   				// If file does not exist, then error. Shuts down
+    {
+        printf("ERROR: Config file does not exist! Shutting down!\n");
+        fclose(file1);
+        return -1;
+    }
+
+    if (fscanf(file1, "%d", &num) != 1)             			// If amount of the children is not correct
+    {
+        fclose(file1);
+        printf("ERROR: Wrong amount of children\n");
+        return -1;
+    }
+
+    if (num < 1)                                   			// If amount of the children is not correct
+    {
+        fclose(file1);
+        printf("ERROR: Wrong amount of children\n");
+        return -1;
+    }
+
+/*    while ((c = fgetc(file1)) != '\n') 				        // Checking on the correctness of the config file 
+    {
+        if (c != ' ')
+        {
+            printf("ERROR: Config file is not correct!\n");
+            fclose(file1);
+            return -1;
+        }    
+    }
+*/
+    if (writeConfig(file1, num) != 0)
+    {
+        printf("ERROR: Config file is not correct!\n");
+        fclose(file1);
+        return -1;
+    }
+    fclose(file1);
+    file1 = fopen(argv[2], "r+");
+    if (file1 == NULL)                  				// If the second config file does not exist, then error
+    {
+        printf("ERROR: Config file is not correct!\n");
+        return 0;
+    }
+    fclose(file1);
+    file1 = fopen(argv[1], "r");                         		// If everything's ok with the config files, we keep going
+    while ((c = fgetc(file1) != '\n'));		
+    createChild(file1, argv[2], num);
+    fclose(file1);
+	
+    return 0;
+}
+
+int createChild(FILE* file1, char* arg, int num)
+{
+    int i, j, pid;
+    char replace, include;
+    FILE* file;
+    readInf(file1, &replace, &include);
+    pid = getpid();
+    printf("Parent PID = %d\n", pid);
+    file = fopen(arg, "r+");
+    changeText(file, replace, include, pid);
+    fclose(file);
+    for(i = 1; i < num; i++)                            
+    {
+        switch(fork())
+        {
+            case -1:
+                printf("ERROR: Fork didn't work!\n");
+               	return -1;
+                break;
+            case 0:
+		pid = getpid();
+                printf("%d.Son PID = %d\n", i, pid);
+                readInf(file1, &replace, &include);
+	        //printf("PID = %d, replace = %c , include = %c\n", getpid(), replace, include);	
+                file = fopen(arg, "r+");
+		changeText(file, replace, include, pid);
+                fclose(file);
+                return 0;           
+                break;
+            default:
+		//printf("%c",include);
+		//file = fopen(arg, "r+");
+		readInf(file1, &replace, &include);
+    		//changeText(file, replace, include, pid);
+    		//fclose(file);
+                //readInf(file1, &replace, &include);
+		//changeText(file, replace, include, pid);
+		//rewind(file);
+		//printf("\n%c\n",include);		
+		break;
+        }
+    }
+    for (i = 1; i < num; i++)
+	    wait(NULL);
+    return 0;
+}
+
+int writeConfig(FILE* file, int num)
+{
+    char c2 = ' ', c1 = ' ';
+    int i = 0, j = 0;
+    int letter[256];	                   			 // Array to follow after repeating symbols
+    for(j = 0; j < 256; j++)
+        letter[j] = 1;
+    j = 0;
+    while((c2 = fgetc(file)) != EOF)
+    {
+        if (c2 == '\n')
+        {
+            if ((j != 2) && (j != 0))
+            return -1;
+            if (j != 0)
+                i++;
+            j = 0;
+            c1 = ' ';
+        }
+        else
+        {
+            if ((c1 != ' ') && (c2 != ' '))
+                return -1;
+            if((c2 != ' ') && (letter[c2] != 1) && (j == 0))
+                return -1;
+            if (j == 0)
+                letter[c2] = 0;
+            if (c2 != ' ')
+                j++;
+            c1 = c2;
+        }
+    }
+
+    if(i != num)
+        return -1;
+    else return 0;
+}
+
+int readInf(FILE* file, char* replace, char* include)
+{
+    int i = 0;
+    char c;
+    do
+    {
+        c = fgetc(file);
+        if ((c != ' ') && (c != '\n'))
+        {
+            if (i == 0)
+                *replace = c;
+            else
+                *include = c;
+            i++;
+        }
+    } while((i != 2) || (c != '\n'));
+    return 0;
+}
+
+int changeText(FILE* file, char replace, char include, int pid)             // Checking the config file, counting words. If the length of a word is less than											 ten, then pointer returns to the beginning of the word and process of 												changing the first letter starts.
+{
+    char c;
+    int k;
+    int i = 0, check = 0, count = 0;
+    while((c=fgetc(file))!= EOF)
+    {
+    	//printf("PID = %d , c = %c\n",getpid(), c);
+
+    	if ((c == '\n') || (c == '.') || (c == ';') || (c == ',') || 
+		    (c == ' ') || (c == '-') || (c == ':') || 
+		    (c == '(') || (c == ')') || (c < 0) || (c > 255))
+            {
+                i = 0;
+                check = 0;
+            } 
+        else 
+        {
+	   
+	   
+            	if ((c == replace) && (i == 0))
+		{
+			count=1;
+			while((c=fgetc(file)))
+			{
+			if ((c == '\n') || (c == '.') || (c == ';') || (c == ',') || 
+		 	   (c == ' ') || (c == '-') || (c == ':') || 
+		 	   (c == '(') || (c == ')') || (c < 0) || (c > 255))
+            			break;
+		    	else 
+				count++;
+			}
+			if(count>=10)
+				check=1;
+		}
+		i++;
+           	if ((check == 1) && (i == 1))
+           	 {
+                fseek(file,-(count+1), SEEK_CUR);
+		printf("PID = %d replace = %c\n",getpid(),replace);
+		includeLetter(file, replace, include, pid);
+		//fseek(file,length-10,SEEK_CUR);
+        	 }
+	   }
+            
+    }
+    //printf("count %d", count);
+    return 0;
+}
+
+int includeLetter(FILE* file, char replace, char include,int pid)
+{
+    char c, i = 0;
+    char pidstr[10];
+    //c = fgetc(file);
+    //fseek(file,0,SEEK_SET);
+    fputc(include, file);
+    //printf("%c\n%c\n",include,replace);
+    //fseek(file,0, SEEK_SET);
+    //fputc(include,file);
+    while ((c = fgetc(file)) != EOF)
+    {
+       if ((c == '\n') || (c == '.') || (c == ';') || (c == ',') || 
+		    (c == ' ') || (c == '-') || (c == ':') || 
+		    (c == '(') || (c == ')') || (c < 0) || (c > 255))
+                break;          
+    }
+    
+    sprintf(pidstr,"%d", pid);
+    i = strlen(pidstr);
+    //printf("%d\n",i);
+    fseek(file, -(i+1), SEEK_CUR);
+    fprintf(file,"%s", pidstr);
+
+    return 0;
+}
